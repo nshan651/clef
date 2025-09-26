@@ -101,6 +101,7 @@ fn run(keep_running: Arc<AtomicBool>,
     // Run the main event loop.
     if let Err(e) = kb_client.keyboard_event_listener(xkb_state, keep_running) {
         eprintln!("An error occurred: {:?}", e);
+        return Err(e)
     }
 
     info!("Daemon stopped.");
@@ -108,11 +109,48 @@ fn run(keep_running: Arc<AtomicBool>,
     Ok(())
 }
 
+/*
 /// Main entry point for the application.
 fn main() -> Result<()> {
     Args::parse();
     let keep_running = Arc::new(AtomicBool::new(true));
     run(keep_running, None)
+}
+*/
+
+/// Main entry point for the application.
+fn main() -> Result<()> {
+    Args::parse();
+
+    // Init info logging.
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"))
+        .is_test(cfg!(test)) // Disable logs during testing.
+        .try_init();
+
+    // Parse config from XDG_CONFIG.
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow!("Could not determine user config directory."))?;
+    let config_path = config_dir.join("clefd").join("clefdrc");
+
+    // Setup keybindings, shared between the UserConfig and the CommandRunner.
+    let keybindings = Arc::new(RwLock::new(HashMap::new()));
+
+    // Read in config and start file watcher.
+    UserConfig::init(config_path, keybindings.clone());
+
+    // Setup process reaper thread.
+    CommandRunner::init(keybindings.clone());
+
+    // Setup xkb state
+    // Also register signals/spawn signal thread here
+    let kb_client = KeyboardClient::new(); // chord_state part of the kbd client
+
+    // This is a function param in the event listener to make it more testable.
+    // Not sure if I'll stick with that though
+    let keep_running = Arc::new(AtomicBool::new(true));
+
+    kb_client.keyboard_event_listener(keep_running);
 }
 
 #[cfg(test)]
